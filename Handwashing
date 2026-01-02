@@ -1,0 +1,219 @@
+"""
+Semmelweis Clinic Dashboard (Clinic 1 vs Clinic 2)
+--------------------------------------------------
+Expected CSV columns:
+- month (YYYY-MM or any sortable date string)
+- births_clinic1, deaths_clinic1
+- births_clinic2, deaths_clinic2
+
+Example rows:
+month,births_clinic1,deaths_clinic1,births_clinic2,deaths_clinic2
+1841-01,336,36,295,7
+1841-02,334,38,276,8
+...
+"""
+
+import pandas as pd
+import plotly.express as px
+from dash import Dash, dcc, html
+from dash.dependencies import Input, Output
+
+# -------------------------
+# 1) Load + prep your data
+# -------------------------
+CSV_PATH = "semmelweis_clinics_monthly.csv"  # <-- change to your file name
+
+df = pd.read_csv(CSV_PATH)
+
+# Make month parseable/sortable
+df["month"] = pd.to_datetime(df["month"], errors="coerce")
+df = df.dropna(subset=["month"]).sort_values("month")
+
+# Compute death rates
+df["death_rate_c1"] = df["deaths_clinic1"] / df["births_clinic1"]
+df["death_rate_c2"] = df["deaths_clinic2"] / df["births_clinic2"]
+
+# -------------------------
+# 2) Helper: KPI summaries
+# -------------------------
+def clinic_kpis(data: pd.DataFrame):
+    births_c1 = data["births_clinic1"].sum()
+    deaths_c1 = data["deaths_clinic1"].sum()
+    rate_c1 = (deaths_c1 / births_c1) if births_c1 else 0
+
+    births_c2 = data["births_clinic2"].sum()
+    deaths_c2 = data["deaths_clinic2"].sum()
+    rate_c2 = (deaths_c2 / births_c2) if births_c2 else 0
+
+    return {
+        "births_c1": births_c1, "deaths_c1": deaths_c1, "rate_c1": rate_c1,
+        "births_c2": births_c2, "deaths_c2": deaths_c2, "rate_c2": rate_c2,
+    }
+
+def card(title, value):
+    return html.Div(
+        style={
+            "flex": "1",
+            "padding": "14px",
+            "borderRadius": "16px",
+            "border": "1px solid #e5e7eb",
+            "background": "white",
+            "boxShadow": "0 1px 6px rgba(0,0,0,0.06)",
+            "minWidth": "190px",
+        },
+        children=[
+            html.Div(title, style={"fontSize": "12px", "opacity": 0.75, "marginBottom": "6px"}),
+            html.Div(value, style={"fontSize": "26px", "fontWeight": "700"}),
+        ],
+    )
+
+# -------------------------
+# 3) Build the Dash app
+# -------------------------
+app = Dash(__name__)
+app.title = "Semmelweis Clinics Dashboard"
+
+min_date = df["month"].min()
+max_date = df["month"].max()
+
+app.layout = html.Div(
+    style={"fontFamily": "system-ui, -apple-system, Segoe UI, Roboto, Arial", "background": "#f8fafc", "padding": "22px"},
+    children=[
+        html.Div(
+            style={"maxWidth": "1150px", "margin": "0 auto"},
+            children=[
+                html.H1("Semmelweis Clinic 1 vs Clinic 2 — Mortality Dashboard", style={"marginBottom": "8px"}),
+                html.Div(
+                    "This dashboard compares monthly maternal deaths and death rates between Clinic 1 and Clinic 2. "
+                    "Use the date range to explore how outcomes differed across time.",
+                    style={"opacity": 0.8, "marginBottom": "18px"},
+                ),
+
+                html.Div(
+                    style={"display": "flex", "gap": "14px", "flexWrap": "wrap", "alignItems": "center", "marginBottom": "16px"},
+                    children=[
+                        html.Div("Date range:", style={"fontWeight": "600"}),
+                        dcc.DatePickerRange(
+                            id="date-range",
+                            min_date_allowed=min_date,
+                            max_date_allowed=max_date,
+                            start_date=min_date,
+                            end_date=max_date,
+                            display_format="YYYY-MM-DD",
+                        ),
+                    ],
+                ),
+
+                html.H2("Overall Summary", style={"marginTop": "6px"}),
+                html.Div(id="kpi-row", style={"display": "flex", "gap": "14px", "flexWrap": "wrap", "marginBottom": "18px"}),
+
+                html.Div(
+                    style={"display": "grid", "gridTemplateColumns": "1fr", "gap": "16px"},
+                    children=[
+                        html.Div(
+                            style={"padding": "14px", "borderRadius": "16px", "border": "1px solid #e5e7eb", "background": "white"},
+                            children=[
+                                html.H3("Monthly Death Rates (Deaths / Births)", style={"marginTop": 0}),
+                                dcc.Graph(id="death-rate-line"),
+                            ],
+                        ),
+                        html.Div(
+                            style={"padding": "14px", "borderRadius": "16px", "border": "1px solid #e5e7eb", "background": "white"},
+                            children=[
+                                html.H3("Monthly Death Counts", style={"marginTop": 0}),
+                                dcc.Graph(id="deaths-bar"),
+                            ],
+                        ),
+                    ],
+                ),
+
+                html.Div(
+                    style={"marginTop": "18px", "opacity": 0.75, "fontSize": "12px"},
+                    children=[
+                        "Tip: If you have additional columns (e.g., handwashing intervention date), we can add an annotation line to the charts."
+                    ],
+                ),
+            ],
+        )
+    ],
+)
+
+# -------------------------
+# 4) Callbacks (interactive)
+# -------------------------
+@app.callback(
+    Output("kpi-row", "children"),
+    Output("death-rate-line", "figure"),
+    Output("deaths-bar", "figure"),
+    Input("date-range", "start_date"),
+    Input("date-range", "end_date"),
+)
+def update_dashboard(start_date, end_date):
+    filtered = df.copy()
+    if start_date:
+        filtered = filtered[filtered["month"] >= pd.to_datetime(start_date)]
+    if end_date:
+        filtered = filtered[filtered["month"] <= pd.to_datetime(end_date)]
+
+    kpis = clinic_kpis(filtered)
+
+    # KPI cards
+    kpi_cards = [
+        card("Clinic 1 — Total Births", f"{kpis['births_c1']:,}"),
+        card("Clinic 1 — Total Deaths", f"{kpis['deaths_c1']:,}"),
+        card("Clinic 1 — Death Rate", f"{kpis['rate_c1']*100:.2f}%"),
+        card("Clinic 2 — Total Births", f"{kpis['births_c2']:,}"),
+        card("Clinic 2 — Total Deaths", f"{kpis['deaths_c2']:,}"),
+        card("Clinic 2 — Death Rate", f"{kpis['rate_c2']*100:.2f}%"),
+    ]
+
+    # Line chart: death rates
+    rate_df = filtered[["month", "death_rate_c1", "death_rate_c2"]].melt(
+        id_vars="month",
+        var_name="clinic",
+        value_name="death_rate"
+    )
+    rate_df["clinic"] = rate_df["clinic"].map({
+        "death_rate_c1": "Clinic 1",
+        "death_rate_c2": "Clinic 2",
+    })
+
+    fig_line = px.line(
+        rate_df,
+        x="month",
+        y="death_rate",
+        color="clinic",
+        markers=True,
+        labels={"month": "Month", "death_rate": "Death Rate", "clinic": "Clinic"},
+        title=None,
+    )
+    fig_line.update_yaxes(tickformat=".1%")
+
+    # Bar chart: deaths
+    deaths_df = filtered[["month", "deaths_clinic1", "deaths_clinic2"]].melt(
+        id_vars="month",
+        var_name="clinic",
+        value_name="deaths"
+    )
+    deaths_df["clinic"] = deaths_df["clinic"].map({
+        "deaths_clinic1": "Clinic 1",
+        "deaths_clinic2": "Clinic 2",
+    })
+
+    fig_bar = px.bar(
+        deaths_df,
+        x="month",
+        y="deaths",
+        color="clinic",
+        barmode="group",
+        labels={"month": "Month", "deaths": "Deaths", "clinic": "Clinic"},
+        title=None,
+    )
+
+    return kpi_cards, fig_line, fig_bar
+
+# -------------------------
+# 5) Run
+# -------------------------
+if __name__ == "__main__":
+    app.run_server(debug=True)
