@@ -1,20 +1,5 @@
 # app.py
-# Streamlit dashboard: Semmelweis Clinic 1 vs Clinic 2 (YEARLY data)
-#
-# Your dataset columns (as shown in your sheet):
-#   Year
-#   Births in Clinic 1
-#   Deaths in Clinic 1
-#   Births in Clinic 2
-#   Deaths in Clinic 2
-#
-# Notes:
-# - "Year" can be like 1841, or text like "1847 (Before)" / "1848 (After)"
-# - This app extracts a numeric year for sorting/filtering, but keeps the original label for display.
-#
-# Run locally:
-#   pip install streamlit pandas plotly
-#   streamlit run app.py
+# Streamlit dashboard: Semmelweis Clinic 1 vs Clinic 2 (YEARLY) — reads CSV from GitHub
 
 import re
 import pandas as pd
@@ -26,19 +11,21 @@ st.set_page_config(page_title="Semmelweis Clinics Dashboard", layout="wide")
 st.title("Semmelweis Clinic 1 vs Clinic 2 — Mortality Dashboard (Yearly)")
 st.write(
     "This dashboard compares yearly maternal deaths and death rates between Clinic 1 and Clinic 2. "
-    "Upload your CSV (exported from your spreadsheet) to view the charts."
+    "Data is loaded automatically from GitHub."
 )
 
 # -------------------------
-# Sidebar: data input
+# GitHub CSV URL (make sure this file exists in your repo)
 # -------------------------
-st.sidebar.header("Data")
-
-uploaded = st.sidebar.file_uploader("Upload CSV", type=["csv"])
+GITHUB_CSV_URL = (
+    "https://raw.githubusercontent.com/"
+    "cristianllerena41-byte/handwashing/main/"
+    "semmelweis_yearly.csv"
+)
 
 @st.cache_data
-def load_data(file_obj):
-    df_local = pd.read_csv(file_obj)
+def load_data():
+    df_local = pd.read_csv(GITHUB_CSV_URL)
 
     # Rename columns from your sheet to the internal names used by the app
     rename_map = {
@@ -59,7 +46,7 @@ def load_data(file_obj):
 
     df_local = df_local.rename(columns=rename_map)
 
-    # Extract numeric year for sorting/filtering (handles '1847 (Before)' etc.)
+    # Extract numeric year for sorting/filtering (handles '1847 (Before...)' etc.)
     def extract_year(x):
         m = re.search(r"\d{4}", str(x))
         return int(m.group(0)) if m else None
@@ -79,26 +66,34 @@ def load_data(file_obj):
 
     return df_local
 
-if uploaded is None:
-    st.warning("Upload your CSV file using the sidebar to see the dashboard.")
-    st.stop()
-
+# Load data (no upload needed)
 try:
-    df = load_data(uploaded)
+    df = load_data()
 except Exception as e:
-    st.error(f"Could not load the CSV.\n\nDetails: {e}")
+    st.error(
+        "Could not load data from GitHub.\n\n"
+        "Checklist:\n"
+        "• The file `semmelweis_yearly.csv` exists in your repo root\n"
+        "• The URL is correct\n"
+        "• The CSV headers match exactly\n\n"
+        f"Details: {e}"
+    )
     st.stop()
 
 # -------------------------
-# Year filter
+# Sidebar: Year filter
 # -------------------------
 st.sidebar.header("Filters")
 
 min_year = int(df["year"].min())
 max_year = int(df["year"].max())
 
-year_range = st.sidebar.slider("Year range", min_value=min_year, max_value=max_year, value=(min_year, max_year))
-start_year, end_year = year_range
+start_year, end_year = st.sidebar.slider(
+    "Year range",
+    min_value=min_year,
+    max_value=max_year,
+    value=(min_year, max_year),
+)
 
 filtered = df[(df["year"] >= start_year) & (df["year"] <= end_year)].copy()
 
@@ -129,7 +124,7 @@ c6.metric("Clinic 2 — Death Rate", f"{rate_c2*100:.2f}%")
 st.divider()
 
 # -------------------------
-# Charts (use original year labels for x-axis)
+# Charts (use year_label for x-axis so "1847 (Before...)" shows)
 # -------------------------
 left, right = st.columns(2)
 
@@ -174,11 +169,17 @@ fig_bar = px.bar(
 
 right.plotly_chart(fig_bar, use_container_width=True)
 
-# -------------------------
-# Optional: show data table
-# -------------------------
-with st.expander("Show filtered data"):
-    show_cols = ["year_label", "births_clinic1", "deaths_clinic1", "death_rate_c1", "births_clinic2", "deaths_clinic2", "death_rate_c2"]
+with st.expander("Show data table"):
+    show_cols = [
+        "year_label",
+        "births_clinic1",
+        "deaths_clinic1",
+        "death_rate_c1",
+        "births_clinic2",
+        "deaths_clinic2",
+        "death_rate_c2",
+    ]
     st.dataframe(filtered[show_cols], use_container_width=True)
 
-st.caption("Tip: Keep your CSV headers exactly the same as your spreadsheet headers so the app can auto-match columns.")
+st.caption("Data source: CSV loaded from GitHub (raw.githubusercontent.com).")
+ Keep your CSV headers exactly the same as your spreadsheet headers so the app can auto-match columns.")
