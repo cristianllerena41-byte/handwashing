@@ -1,5 +1,5 @@
 # app.py
-# Streamlit dashboard: Semmelweis Clinic 1 vs Clinic 2 (YEARLY) — reads CSV from GitHub
+# Semmelweis Clinic 1 vs Clinic 2 — Yearly Dashboard (reads CSV from GitHub)
 
 import re
 import pandas as pd
@@ -15,7 +15,7 @@ st.write(
 )
 
 # -------------------------
-# GitHub CSV URL (make sure this file exists in your repo)
+# GitHub CSV URL (file must exist in your repo root)
 # -------------------------
 GITHUB_CSV_URL = (
     "https://raw.githubusercontent.com/"
@@ -24,10 +24,10 @@ GITHUB_CSV_URL = (
 )
 
 @st.cache_data
-def load_data():
-    df_local = pd.read_csv(GITHUB_CSV_URL)
+def load_data_from_github(url: str) -> pd.DataFrame:
+    df = pd.read_csv(url)
 
-    # Rename columns from your sheet to the internal names used by the app
+    # Expected CSV headers (must match exactly)
     rename_map = {
         "Year": "year_label",
         "Births in Clinic 1": "births_clinic1",
@@ -36,55 +36,56 @@ def load_data():
         "Deaths in Clinic 2": "deaths_clinic2",
     }
 
-    missing = [c for c in rename_map.keys() if c not in df_local.columns]
+    missing = [c for c in rename_map.keys() if c not in df.columns]
     if missing:
         raise ValueError(
             "Missing columns in CSV: "
             + ", ".join(missing)
-            + "\nMake sure your CSV headers exactly match the spreadsheet headers."
+            + ". Make sure your CSV headers match exactly."
         )
 
-    df_local = df_local.rename(columns=rename_map)
+    df = df.rename(columns=rename_map)
 
-    # Extract numeric year for sorting/filtering (handles '1847 (Before...)' etc.)
+    # Extract numeric year for sorting/filtering (handles '1847 (Before ...)' etc.)
     def extract_year(x):
         m = re.search(r"\d{4}", str(x))
         return int(m.group(0)) if m else None
 
-    df_local["year"] = df_local["year_label"].apply(extract_year)
-    df_local = df_local.dropna(subset=["year"]).sort_values("year")
+    df["year"] = df["year_label"].apply(extract_year)
+    df = df.dropna(subset=["year"]).sort_values("year")
 
-    # Ensure numeric for births/deaths columns
+    # Ensure numeric births/deaths
     num_cols = ["births_clinic1", "deaths_clinic1", "births_clinic2", "deaths_clinic2"]
     for c in num_cols:
-        df_local[c] = pd.to_numeric(df_local[c], errors="coerce")
-    df_local = df_local.dropna(subset=num_cols)
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=num_cols)
 
     # Compute death rates
-    df_local["death_rate_c1"] = df_local["deaths_clinic1"] / df_local["births_clinic1"]
-    df_local["death_rate_c2"] = df_local["deaths_clinic2"] / df_local["births_clinic2"]
+    df["death_rate_c1"] = df["deaths_clinic1"] / df["births_clinic1"]
+    df["death_rate_c2"] = df["deaths_clinic2"] / df["births_clinic2"]
 
-    return df_local
+    return df
 
-# Load data (no upload needed)
+# -------------------------
+# Load data
+# -------------------------
 try:
-    df = load_data()
+    df = load_data_from_github(GITHUB_CSV_URL)
 except Exception as e:
     st.error(
-        "Could not load data from GitHub.\n\n"
+        "Could not load the CSV from GitHub.\n\n"
         "Checklist:\n"
-        "• The file `semmelweis_yearly.csv` exists in your repo root\n"
-        "• The URL is correct\n"
+        "• You uploaded `semmelweis_yearly.csv` to the repo root\n"
+        "• The filename matches exactly\n"
         "• The CSV headers match exactly\n\n"
         f"Details: {e}"
     )
     st.stop()
 
 # -------------------------
-# Sidebar: Year filter
+# Sidebar filter
 # -------------------------
 st.sidebar.header("Filters")
-
 min_year = int(df["year"].min())
 max_year = int(df["year"].max())
 
@@ -124,7 +125,7 @@ c6.metric("Clinic 2 — Death Rate", f"{rate_c2*100:.2f}%")
 st.divider()
 
 # -------------------------
-# Charts (use year_label for x-axis so "1847 (Before...)" shows)
+# Charts
 # -------------------------
 left, right = st.columns(2)
 
@@ -132,9 +133,11 @@ left, right = st.columns(2)
 rate_df = filtered[["year", "year_label", "death_rate_c1", "death_rate_c2"]].melt(
     id_vars=["year", "year_label"],
     var_name="clinic",
-    value_name="death_rate"
+    value_name="death_rate",
 )
-rate_df["clinic"] = rate_df["clinic"].map({"death_rate_c1": "Clinic 1", "death_rate_c2": "Clinic 2"})
+rate_df["clinic"] = rate_df["clinic"].map(
+    {"death_rate_c1": "Clinic 1", "death_rate_c2": "Clinic 2"}
+)
 
 fig_line = px.line(
     rate_df.sort_values("year"),
@@ -146,16 +149,17 @@ fig_line = px.line(
     title="Yearly Death Rates (Deaths / Births)",
 )
 fig_line.update_yaxes(tickformat=".1%")
-
 left.plotly_chart(fig_line, use_container_width=True)
 
 # Bar chart: deaths
 deaths_df = filtered[["year", "year_label", "deaths_clinic1", "deaths_clinic2"]].melt(
     id_vars=["year", "year_label"],
     var_name="clinic",
-    value_name="deaths"
+    value_name="deaths",
 )
-deaths_df["clinic"] = deaths_df["clinic"].map({"deaths_clinic1": "Clinic 1", "deaths_clinic2": "Clinic 2"})
+deaths_df["clinic"] = deaths_df["clinic"].map(
+    {"deaths_clinic1": "Clinic 1", "deaths_clinic2": "Clinic 2"}
+)
 
 fig_bar = px.bar(
     deaths_df.sort_values("year"),
@@ -166,20 +170,9 @@ fig_bar = px.bar(
     labels={"year_label": "Year", "deaths": "Deaths", "clinic": "Clinic"},
     title="Yearly Death Counts",
 )
-
 right.plotly_chart(fig_bar, use_container_width=True)
 
 with st.expander("Show data table"):
-    show_cols = [
-        "year_label",
-        "births_clinic1",
-        "deaths_clinic1",
-        "death_rate_c1",
-        "births_clinic2",
-        "deaths_clinic2",
-        "death_rate_c2",
-    ]
-    st.dataframe(filtered[show_cols], use_container_width=True)
+    st.dataframe(filtered, use_container_width=True)
 
-st.caption("Data source: CSV loaded from GitHub (raw.githubusercontent.com).")
- Keep your CSV headers exactly the same as your spreadsheet headers so the app can auto-match columns.")
+st.caption("Make sure your CSV headers match exactly: Year, Births in Clinic 1, Deaths in Clinic 1, Births in Clinic 2, Deaths in Clinic 2.")
